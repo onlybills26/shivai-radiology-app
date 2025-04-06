@@ -1,5 +1,5 @@
-streamlit==1.32.0
+streamlit
 openai
 requests
-streamlit-webrtc==0.45.0
-SpeechRecognition
+speechrecognition
+audio_recorder_streamlit

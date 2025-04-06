@@ -2,21 +2,21 @@
 import streamlit as st
 import openai
 import requests
-import av
-import numpy as np
 import io
+import time
 import speech_recognition as sr
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+from audio_recorder_streamlit import audio_recorder
 
-# --------------------------------------------------------------------------
-# ShivAI Radiology Reporting App - WebRTC Audio Version (Streamlit Cloud Compatible)
-# --------------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# ShivAI Radiology Reporting App
+# © 2024 onlybills26@gmail.com - All Rights Reserved
+# ----------------------------------------------------------------------
 
-# Config
+# --- Config ---
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Embedded Templates
+# --- Embedded Templates & GitHub fallback ---
 EMBEDDED_TEMPLATES = {
     "CT Abdomen": """Type of Study: CT Abdomen and Pelvis\nHistory:\nFindings:\n- Liver: Normal.\n- Gallbladder: No stones.\n- Pancreas: Normal.\n- Spleen: Normal.\n- Kidneys: No hydronephrosis.\nImpression:""",
     "CT Chest": """Type of Study: CT Chest\nHistory:\nFindings:\n- Lungs: Clear.\n- Mediastinum: Normal.\n- Pleura: No effusion.\nImpression:""",
@@ -24,22 +24,20 @@ EMBEDDED_TEMPLATES = {
     "Ultrasound Abdomen": """Type of Study: Ultrasound Abdomen\nHistory:\nFindings:\n- Liver: Normal echotexture.\n- Gallbladder: No stones.\n- CBD: Not dilated.\nImpression:""",
     "Ultrasound Pelvis": """Type of Study: Ultrasound Pelvis (Female)\nHistory:\nFindings:\n- Uterus: Normal size and echotexture.\n- Ovaries: Normal.\nImpression:"""
 }
-
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/onlybills26/radiology-templates/main/"
 
-# Auto Template Detection
+# --- Template detection from findings ---
 def detect_template(text):
     keywords = {
-        "liver": "CT Abdomen", "gallbladder": "CT Abdomen", "lung": "CT Chest",
-        "nodule": "CT Chest", "brain": "MRI Brain", "ovary": "Ultrasound Pelvis",
-        "uterus": "Ultrasound Pelvis", "CBD": "Ultrasound Abdomen", "kidney": "Ultrasound Abdomen"
+        "liver": "CT Abdomen", "gallbladder": "CT Abdomen", "lung": "CT Chest", "nodule": "CT Chest",
+        "brain": "MRI Brain", "ovary": "Ultrasound Pelvis", "uterus": "Ultrasound Pelvis",
+        "CBD": "Ultrasound Abdomen", "kidney": "Ultrasound Abdomen"
     }
     for word, template in keywords.items():
         if word in text.lower():
             return template
     return None
 
-# Template Fetch
 def fetch_template(name):
     try:
         url = GITHUB_RAW_BASE + name.replace(" ", "%20") + ".txt"
@@ -47,49 +45,40 @@ def fetch_template(name):
         if response.status_code == 200:
             return response.text
     except Exception as e:
-        st.error(f"Error fetching template from GitHub: {e}")
+        st.error(f"Error fetching template: {e}")
     return EMBEDDED_TEMPLATES.get(name, None)
 
-# WebRTC Audio Stream
-st.markdown("### 🎙️ Dictation Mode (WebRTC)")
-st.info("Start speaking. When you stop, we will process the audio.")
+# --- UI Header ---
+st.title("ShivAI Radiology Assistant")
 
-class AudioProcessor:
-    def __init__(self):
-        self.buffer = io.BytesIO()
-
-    def recv(self, frame):
-        pcm = frame.to_ndarray()
-        self.buffer.write(pcm.tobytes())
-        return frame
-
-audio_ctx = webrtc_streamer(
-    key="speech",
-    mode=WebRtcMode.SENDONLY,
-    client_settings=ClientSettings(media_stream_constraints={"audio": True, "video": False}),
-    audio_receiver_size=1024,
-)
+# --- Audio Recording ---
+st.subheader("🎙️ Dictation Mode")
+st.info("Click the mic button to start recording. Stop speaking to auto-capture.")
+audio = audio_recorder(pause_threshold=2.0)
 
 dictation_text = ""
-if audio_ctx.audio_receiver:
-    audio_frames = audio_ctx.audio_receiver.get_frames(timeout=5)
-    audio_data = b"".join([frame.to_ndarray().tobytes() for frame in audio_frames])
-    if audio_data:
-        st.success("Audio received. Processing...")
-        recognizer = sr.Recognizer()
-        try:
-            with sr.AudioFile(io.BytesIO(audio_data)) as source:
-                audio = recognizer.record(source)
-            dictation_text = recognizer.recognize_google(audio)
+if audio:
+    st.success("Audio captured. Transcribing...")
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(io.BytesIO(audio)) as source:
+            audio_data = recognizer.record(source)
+            dictation_text = recognizer.recognize_google(audio_data)
             st.text_area("Dictated Text", dictation_text, height=200)
-        except Exception as e:
-            st.error(f"Speech recognition failed: {e}")
+    except sr.UnknownValueError:
+        st.error("Could not understand audio.")
+    except sr.RequestError as e:
+        st.error(f"API error: {e}")
+    except Exception as ex:
+        st.error(f"Unexpected error: {ex}")
+else:
+    st.info("Waiting for audio input...")
 
-# App UI
-st.title("ShivAI Radiology Assistant")
+# --- Mode Selection ---
 mode = st.radio("Choose Mode", ["Report", "Compare"])
 auto = st.checkbox("Auto-detect Template", value=True)
 
+# --- Comparison Mode ---
 if mode == "Compare":
     current = st.text_area("Paste Current Report")
     prior = st.text_area("Paste Prior Report(s)")
@@ -101,6 +90,8 @@ if mode == "Compare":
                 messages=[{"role": "system", "content": prompt}]
             )
             st.text_area("Comparative Impression", res.choices[0].message.content, height=300)
+
+# --- Report Generation Mode ---
 else:
     findings_input = st.text_area("Key Findings / Dictation", value=dictation_text)
     template_name = detect_template(findings_input) if auto else st.selectbox("Select Template", list(EMBEDDED_TEMPLATES.keys()))
@@ -109,8 +100,9 @@ else:
     if st.button("Generate Report"):
         template = fetch_template(template_name)
         if not template:
-            st.error("Template not found. Please check the template name or your internet connection.")
+            st.error("Template not found. Check your connection or template name.")
             st.stop()
+
         prompt = f"You are a radiologist assistant. Use the findings below and insert them into the template provided. Remove any conflicting or redundant lines. Format it with the following headings:\n\nType of Study\nHistory\nFindings\nImpression\n\nTEMPLATE:\n{template}\n\nFINDINGS:\n{findings_input}"
         with st.spinner("Generating report..."):
             res = openai.chat.completions.create(
@@ -121,6 +113,6 @@ else:
             st.text_area("Final Report", final_report, height=500)
             st.download_button("Copy to Clipboard", final_report)
 
-# Footer
+# --- Footer ---
 st.markdown("---")
-st.markdown("© 2024 ShivAI | All Rights Reserved. Unauthorized use or resale prohibited.")
+st.markdown("© 2024 ShivAI | All Rights Reserved.")
