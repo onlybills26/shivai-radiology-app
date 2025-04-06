@@ -21,9 +21,12 @@ if "authenticated" not in st.session_state:
     password = st.text_input("Enter App Password", type="password")
     if password == st.secrets["APP_PASSWORD"]:
         st.session_state.authenticated = True
+        st.success("Access granted. Reloading...")
         st.experimental_rerun()
-    else:
-        st.stop()
+    elif password != "":
+        st.error("Incorrect password. Please try again.")
+    st.stop()
+
 
 
 # --- Template Source ---
