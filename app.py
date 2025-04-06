@@ -18,9 +18,12 @@ if not st.session_state.authenticated:
     password = st.text_input("Enter Password", type="password")
     if password == st.secrets["APP_PASSWORD"]:
         st.session_state.authenticated = True
-        st.experimental_rerun()
-    else:
+        st.success("Access granted. Please reload the page manually.")
         st.stop()
+    else:
+        st.warning("Enter correct password to access.")
+        st.stop()
+
 
 # --- Config ---
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
