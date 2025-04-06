@@ -1,4 +1,3 @@
-
 # ------------------------------------------------------------------------------
 # ShivAI Radiology Reporting App
 # © 2024 onlybills26@gmail.com - All Rights Reserved
@@ -10,137 +9,56 @@
 import streamlit as st
 import openai
 import os
-from datetime import datetime
+import requests
+import time
 
+# --- Config ---
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
-
-# Load API Key securely
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-TEMPLATE_DIR = "templates"
-os.makedirs(TEMPLATE_DIR, exist_ok=True)
-
-BASELINE_TEMPLATES = {
-    "CT Abdomen": "Type of Study: CT Abdomen and Pelvis\nHistory:\nFindings:\nImpression:",
-    "CT Chest": "Type of Study: CT Chest\nHistory:\nFindings:\nImpression:",
-    "MRI Brain": "Type of Study: MRI Brain\nHistory:\nFindings:\nImpression:",
-    "Ultrasound Abdomen": "Type of Study: Ultrasound Abdomen\nHistory:\nFindings:\nImpression:",
-    "Ultrasound Pelvis": "Type of Study: Ultrasound Pelvis (Female)\nHistory:\nFindings:\nImpression:",
-    "MRCP": "Type of Study: MRCP\nHistory:\nFindings:\nImpression:",
-    "Thyroid Ultrasound (TI-RADS)": "Type of Study: Ultrasound Thyroid (TI-RADS)\nHistory:\nFindings:\nImpression:",
-    "Breast Ultrasound (BI-RADS)": "Type of Study: Ultrasound Breast (BI-RADS)\nHistory:\nFindings:\nImpression:",
-    "Liver CT (LI-RADS)": "Type of Study: CT Liver (LI-RADS)\nHistory:\nFindings:\nImpression:",
-    "Prostate MRI (PI-RADS)": "Type of Study: MRI Prostate (PI-RADS)\nHistory:\nFindings:\nImpression:"
+# --- Template Source ---
+EMBEDDED_TEMPLATES = {
+    "CT Abdomen": "Type of Study: CT Abdomen and Pelvis\nHistory:\nFindings:\n- Liver: Normal.\n- Gallbladder: No stones.\n- Pancreas: Normal.\n- Spleen: Normal.\n- Kidneys: No hydronephrosis.\nImpression:",
+    "CT Chest": "Type of Study: CT Chest\nHistory:\nFindings:\n- Lungs: Clear.\n- Mediastinum: Normal.\n- Pleura: No effusion.\nImpression:",
+    "MRI Brain": "Type of Study: MRI Brain\nHistory:\nFindings:\n- No acute infarct.\n- No mass lesion.\nImpression:",
+    "Ultrasound Abdomen": "Type of Study: Ultrasound Abdomen\nHistory:\nFindings:\n- Liver: Normal echotexture.\n- Gallbladder: No stones.\n- CBD: Not dilated.\nImpression:",
+    "Ultrasound Pelvis": "Type of Study: Ultrasound Pelvis (Female)\nHistory:\nFindings:\n- Uterus: Normal size and echotexture.\n- Ovaries: Normal.\nImpression:",
+    "CT Brain": "Type of Study: CT Brain (Non-contrast)\nHistory:\nFindings:\n- No acute intracranial hemorrhage.\n- Ventricles: Normal in size.\n- No midline shift.\nImpression:",
+    "CT Neck": "Type of Study: CT Neck\nHistory:\nFindings:\n- No mass or lymphadenopathy.\n- Airway patent.\n- Carotid spaces normal.\nImpression:",
+    "CT Angiogram – Brain and Neck": "Type of Study: CT Angiogram – Brain and Neck\nHistory:\nFindings:\n- Arteries opacify well.\n- No aneurysm or stenosis.\nImpression:",
+    "CT Spine": "Type of Study: CT Spine\nHistory:\nFindings:\n- No acute bony abnormality.\n- Disc spaces preserved.\nImpression:",
+    "CT Lower Limb Angiogram": "Type of Study: CT Lower Limb Angiogram\nHistory:\nFindings:\n- Arterial tree opacified.\n- No stenosis or occlusion.\nImpression:",
+    "US Renal Doppler": "Type of Study: Ultrasound Renal Doppler\nHistory:\nFindings:\n- Normal renal size.\n- Resistive indices within normal limits.\nImpression:",
+    "US Carotid Doppler": "Type of Study: Ultrasound Carotid Doppler\nHistory:\nFindings:\n- Common and internal carotid arteries evaluated.\n- No significant stenosis by NASCET criteria.\nImpression:",
+    "MRCP": "Type of Study: MRCP\nHistory:\nFindings:\n- Biliary tree: No dilation.\n- Pancreatic duct: Normal caliber.\nImpression:",
+    "MRI Rectum": "Type of Study: MRI Rectum\nHistory:\nFindings:\n- Rectal wall: No thickening or mass.\n- Mesorectum: Intact.\nImpression:",
+    "MRI Anal Fistula": "Type of Study: MRI Anal Fistula\nHistory:\nFindings:\n- Inter-sphincteric track noted.\n- No abscess.\nImpression:",
+    "MR Enterogram": "Type of Study: MR Enterogram\nHistory:\nFindings:\n- Small bowel: No wall thickening or enhancement.\n- No stricture or fistula.\nImpression:"
 }
 
-def list_templates():
-    return [f for f in os.listdir(TEMPLATE_DIR) if f.endswith(".txt")]
+GITHUB_RAW_BASE = "https://raw.githubusercontent.com/onlybills26/radiology-templates/main/"
 
-def load_template(name):
-    local_path = os.path.join(TEMPLATE_DIR, f"{name}.txt")
-    if os.path.exists(local_path):
-        with open(local_path, "r") as f:
-            return f.read()
-    if name in BASELINE_TEMPLATES:
-        return BASELINE_TEMPLATES[name]
-    return None
-
-def detect_template_from_findings(text):
+# --- Auto Template Detection ---
+def detect_template(text):
     keywords = {
         "liver": "CT Abdomen",
-        "thyroid": "Thyroid Ultrasound (TI-RADS)",
-        "breast": "Breast Ultrasound (BI-RADS)",
-        "lung nodule": "CT Chest",
-        "prostate": "Prostate MRI (PI-RADS)",
-        "biliary": "MRCP",
+        "gallbladder": "CT Abdomen",
+        "lung": "CT Chest",
+        "nodule": "CT Chest",
         "brain": "MRI Brain",
-        "pelvis": "Ultrasound Pelvis",
+        "ovary": "Ultrasound Pelvis",
+        "uterus": "Ultrasound Pelvis",
+        "CBD": "Ultrasound Abdomen",
+        "kidney": "Ultrasound Abdomen",
+        "rectum": "MRI Rectum",
+        "ileum": "MR Enterogram",
+        "anal": "MRI Anal Fistula",
+        "carotid": "US Carotid Doppler",
+        "renal artery": "US Renal Doppler",
+        "spine": "CT Spine",
+        "circle of willis": "CT Angiogram – Brain and Neck"
     }
-    for keyword, template in keywords.items():
-        if keyword in text.lower():
+    for word, template in keywords.items():
+        if word in text.lower():
             return template
     return None
-
-# Sidebar - Template Management
-st.sidebar.title("Templates")
-template_action = st.sidebar.radio("Template Action", ["Use Template", "Add Template", "Edit Template", "Delete Template"])
-
-if template_action == "Add Template":
-    name = st.sidebar.text_input("New Template Name")
-    content = st.sidebar.text_area("Template Content")
-    if st.sidebar.button("Save"):
-        with open(os.path.join(TEMPLATE_DIR, f"{name}.txt"), "w") as f:
-            f.write(content)
-        st.sidebar.success("Template saved.")
-
-elif template_action == "Edit Template":
-    selected = st.sidebar.selectbox("Select Template", list_templates())
-    if selected:
-        with open(os.path.join(TEMPLATE_DIR, selected), "r") as f:
-            content = f.read()
-        edited = st.sidebar.text_area("Edit Template", value=content)
-        if st.sidebar.button("Update Template"):
-            with open(os.path.join(TEMPLATE_DIR, selected), "w") as f:
-                f.write(edited)
-            st.sidebar.success("Template updated.")
-
-elif template_action == "Delete Template":
-    selected = st.sidebar.selectbox("Template to Delete", list_templates())
-    if selected and st.sidebar.button("Delete"):
-        os.remove(os.path.join(TEMPLATE_DIR, selected))
-        st.sidebar.warning("Template deleted.")
-
-# --- Main App UI ---
-st.title("ShivAI Radiology Reporting Assistant")
-
-mode = st.radio("Choose Mode", ["Dictate/Type Findings", "Compare Reports"])
-
-auto_detect = st.checkbox("Auto-detect Template", value=True)
-show_changes = st.checkbox("Show Changes")
-
-if mode == "Compare Reports":
-    st.subheader("Current Report")
-    current = st.text_area("Paste current report")
-    st.subheader("Prior Report(s)")
-    prior = st.text_area("Paste one or more prior reports")
-
-    if st.button("Compare & Generate Impression"):
-        prompt = f"You are a radiologist. Compare the current report below to the prior ones and summarize only significant changes. Ignore irrelevant findings like osteophytes or vascular calcification.\n\nCURRENT REPORT:\n{current}\n\nPRIOR REPORTS:\n{prior}"
-        with st.spinner("Generating comparative impression..."):
-            res = openai.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "system", "content": prompt}]
-            )
-            output = res.choices[0].message.content
-            st.text_area("Comparative Impression", output, height=300)
-
-else:
-    findings = st.text_area("Key Findings or Dictation")
-
-    selected_template = None
-    if not auto_detect:
-        selected_template = st.selectbox("Select Template", list_templates())
-    else:
-        detected = detect_template_from_findings(findings)
-        st.markdown(f"**Auto-Detected Template:** {detected or 'None'}")
-        selected_template = detected
-
-    if st.button("Generate Report"):
-        template = load_template(selected_template)
-        if not template:
-            st.warning(f"Template '{selected_template}' not found. Please create it or select manually.")
-            st.stop()
-
-        prompt = f"You are a radiologist assistant. Insert the following findings into the report template below. Remove any conflicting normal lines. Tidy the result. Always include structured impression.\n\nTEMPLATE:\n{template}\n\nFINDINGS:\n{findings}"
-        with st.spinner("Generating Report..."):
-            res = openai.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            final = res.choices[0].message.content
-            st.text_area("Final Report", final, height=500)
-            st.download_button("Copy to Clipboard", final)
-
-# Footer
-st.markdown("---")
-st.markdown("© 2024 ShivAI | All Rights Reserved. Unauthorized use or resale prohibited. Contact onlybills26@gmail.com")
