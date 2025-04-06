@@ -3,4 +3,6 @@ openai
 requests
 speechrecognition
 streamlit-webrtc
-streamlit-mic-recorder
+streamlit-mic-recorderstreamlit
+pydub
+numpy
