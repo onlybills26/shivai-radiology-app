@@ -55,30 +55,58 @@ def fetch_template(name):
         st.error(f"Error fetching template from GitHub: {e}")
     return EMBEDDED_TEMPLATES.get(name, None)
 
-# --- Dictation Mode ---
-st.markdown("### 🎙️ Dictation Mode")
-st.info("Press the button below to start dictation. The recording will stop automatically after 30 seconds of silence.")
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
+import av
+import queue
+import threading
 
-audio_data = mic_recorder(start_prompt="🎙️ Start Dictation")
+st.markdown("### 🎙️ Dictation Mode")
+st.info("Speak into your mic. Dictation starts immediately after allowing access.")
+
+audio_queue = queue.Queue()
+
+# Audio processor
+def audio_frame_callback(frame: av.AudioFrame) -> av.AudioFrame:
+    audio_queue.put(frame.to_ndarray().flatten().tobytes())
+    return frame
+
+# Start WebRTC streamer
+webrtc_ctx = webrtc_streamer(
+    key="speech",
+    mode=WebRtcMode.SENDONLY,
+    in_audio=True,
+    audio_frame_callback=audio_frame_callback,
+    media_stream_constraints={"audio": True, "video": False},
+    async_processing=True,
+)
 
 dictation_text = ""
-if audio_data and "audio" in audio_data:
-    audio_bytes = audio_data["audio"]
-    st.success("Audio captured. Processing dictation...")
+
+def recognize_from_queue():
     r = sr.Recognizer()
-    try:
-        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
-            audio_source = r.record(source)
-        dictation_text = r.recognize_google(audio_source)
-        st.text_area("Dictated Text", dictation_text, height=200)
-    except sr.UnknownValueError:
-        st.error("Speech Recognition could not understand the audio.")
-    except sr.RequestError as e:
-        st.error(f"Could not request results from the speech recognition service; {e}")
-    except Exception as ex:
-        st.error(f"An error occurred during audio processing: {ex}")
-else:
-    st.info("Waiting for audio input...")
+    audio_bytes = b''.join(list(audio_queue.queue))
+    if len(audio_bytes) == 0:
+        return None
+    with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
+        audio_data = r.record(source)
+    return r.recognize_google(audio_data)
+
+if webrtc_ctx.state.playing:
+    st.warning("Listening... Speak now.")
+    if st.button("Stop & Transcribe"):
+        with st.spinner("Transcribing audio..."):
+            try:
+                dictation_text = recognize_from_queue()
+                if dictation_text:
+                    st.success("Dictation captured:")
+                    st.text_area("Dictated Text", dictation_text, height=200)
+                else:
+                    st.error("No speech detected.")
+            except sr.UnknownValueError:
+                st.error("Could not understand audio.")
+            except Exception as e:
+                st.error(f"Error during recognition: {e}")
+
 
 # --- Main UI ---
 st.title("ShivAI Radiology Assistant")
