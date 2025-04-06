@@ -1,6 +1,7 @@
 streamlit
 openai
 requests
-streamlit-mic-recorder
+speechrecognition
+streamlit-webrtc
 
 
