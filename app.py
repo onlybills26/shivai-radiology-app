@@ -1,159 +1,125 @@
 import streamlit as st
-import os
 import openai
-from openai import OpenAI
-import streamlit.components.v1 as components
+import os
+import difflib
+from datetime import datetime
 
-# --- PASSWORD GATE ---
-def check_password():
-    def password_entered():
-        if st.session_state["password"] == "shivaccess2024":
-            st.session_state["password_correct"] = True
-        else:
-            st.session_state["password_correct"] = False
+# --- ShivAI Radiology Reporting App ---
+# © 2024 onlybills26. All Rights Reserved.
+# Unauthorized copying, distribution, or modification is prohibited.
 
-    if "password_correct" not in st.session_state:
-        st.text_input("Enter password", type="password", on_change=password_entered, key="password")
-        st.stop()
-    elif not st.session_state["password_correct"]:
-        st.text_input("Enter password", type="password", on_change=password_entered, key="password")
-        st.error("Incorrect password")
-        st.stop()
-
-check_password()
-
-# --- SETUP ---
+# --- Streamlit Config ---
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- TEMPLATE MANAGEMENT ---
+# --- Secure API Key Handling ---
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# --- Template Storage Directory ---
 TEMPLATE_DIR = "templates"
 os.makedirs(TEMPLATE_DIR, exist_ok=True)
 
+# --- Helper Functions ---
 def list_templates():
     return [f for f in os.listdir(TEMPLATE_DIR) if f.endswith(".txt")]
 
-st.sidebar.title("Templates")
-template_action = st.sidebar.radio("Manage Templates", ["Use Template", "Add", "Edit", "Delete"])
+def load_template(name):
+    with open(f"{TEMPLATE_DIR}/{name}", "r") as f:
+        return f.read()
 
-if template_action == "Add":
-    name = st.sidebar.text_input("New Template Name")
-    content = st.sidebar.text_area("Template Content")
-    if st.sidebar.button("Save"):
-        with open(f"{TEMPLATE_DIR}/{name}.txt", "w") as f:
-            f.write(content)
+def save_template(name, content):
+    with open(f"{TEMPLATE_DIR}/{name}", "w") as f:
+        f.write(content)
+
+def delete_template(name):
+    os.remove(f"{TEMPLATE_DIR}/{name}")
+
+# --- Sidebar: Template Management ---
+st.sidebar.title("Templates")
+template_action = st.sidebar.radio("Manage Templates", ["Use Template", "Add Template", "Edit Template", "Delete Template"])
+
+if template_action == "Add Template":
+    new_name = st.sidebar.text_input("Template Name")
+    new_content = st.sidebar.text_area("Template Content")
+    if st.sidebar.button("Save Template"):
+        save_template(f"{new_name}.txt", new_content)
         st.sidebar.success("Template saved.")
 
-elif template_action == "Edit":
-    selected = st.sidebar.selectbox("Select Template to Edit", list_templates())
+elif template_action == "Edit Template":
+    selected = st.sidebar.selectbox("Select Template", list_templates())
     if selected:
-        with open(f"{TEMPLATE_DIR}/{selected}", "r") as f:
-            current = f.read()
+        current = load_template(selected)
         edited = st.sidebar.text_area("Edit Template", value=current)
-        if st.sidebar.button("Update"):
-            with open(f"{TEMPLATE_DIR}/{selected}", "w") as f:
-                f.write(edited)
+        if st.sidebar.button("Update Template"):
+            save_template(selected, edited)
             st.sidebar.success("Template updated.")
 
-elif template_action == "Delete":
-    selected = st.sidebar.selectbox("Select Template to Delete", list_templates())
-    if selected and st.sidebar.button("Delete"):
-        os.remove(f"{TEMPLATE_DIR}/{selected}")
-        st.sidebar.warning(f"{selected} deleted.")
+elif template_action == "Delete Template":
+    selected = st.sidebar.selectbox("Select Template", list_templates())
+    if selected and st.sidebar.button("Delete Template"):
+        delete_template(selected)
+        st.sidebar.warning(f"Deleted {selected}")
 
-# --- DICTATION COMPONENT ---
-def mic_input(label):
-    st.markdown(f"**{label}**")
-    components.html("""
-    <script>
-    const startDictation = () => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = new SpeechRecognition();
-        recognition.lang = 'en-US';
-        recognition.continuous = true;
-        recognition.interimResults = false;
+# --- Access Control ---
+password = st.text_input("Enter Access Password", type="password")
+if password != st.secrets.get("app_password", "shivaccess2024"):
+    st.stop()
 
-        let lastInputTime = Date.now();
-        let timeoutId;
-
-        recognition.onresult = function(event) {
-            let transcript = event.results[event.resultIndex][0].transcript;
-            let textarea = window.parent.document.querySelector('textarea');
-            if (textarea) {
-                textarea.value += transcript + " ";
-                textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-            lastInputTime = Date.now();
-        }
-
-        recognition.onend = function() {
-            let now = Date.now();
-            if (now - lastInputTime < 30000) {
-                recognition.start();
-            }
-        }
-
-        recognition.start();
-    }
-    </script>
-    <button onclick="startDictation()">🎤 Start Dictation</button>
-    """, height=40)
-
-# --- TEMPLATE SUGGESTION ---
-def guess_template(text):
-    keywords = {
-        "lung": "CT Chest.txt",
-        "liver": "CT Abdomen.txt",
-        "ovary": "Ultrasound Pelvis.txt",
-        "brain": "MRI Brain.txt",
-        "thyroid": "Ultrasound Thyroid.txt",
-    }
-    for key, template in keywords.items():
-        if key in text.lower():
-            return template
-    return None
-
-# --- MAIN INTERFACE ---
+# --- Main Title ---
 st.title("ShivAI Radiology Report Generator")
-mode = st.radio("Choose Mode", ["Dictate / Type Findings", "Compare Reports"])
 
-if mode == "Dictate / Type Findings":
-    mic_input("🎤 Dictate Findings (Optional)")
-    input_text = st.text_area("Enter key findings or paste here")
-    default_template = guess_template(input_text)
+mode = st.radio("Select Mode", ["Dictate/Type Findings", "Paste Full Report", "Compare Reports"])
 
-    selected_template = st.selectbox("Select Template (optional)", ["Auto Detect"] + list_templates())
-    use_template = default_template if selected_template == "Auto Detect" else selected_template
+# --- Compare Mode ---
+if mode == "Compare Reports":
+    st.subheader("Current Report")
+    current = st.text_area("Paste Current Report")
+    st.subheader("Prior Reports")
+    prior = st.text_area("Paste Previous Report(s)")
+    show_diff = st.checkbox("Show Changes")
+    if st.button("Compare & Generate Impression"):
+        prompt = f"You are a radiologist. Compare the current report below to the prior ones and summarize only significant changes. Ignore irrelevant findings like osteophytes or atherosclerosis.\n\nCURRENT REPORT:\n{current}\n\nPRIOR REPORTS:\n{prior}"
+        with st.spinner("Generating comparative impression..."):
+            res = openai.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "system", "content": prompt}]
+            )
+            comparison = res.choices[0].message.content
+            st.text_area("Comparative Impression", comparison, height=300)
+            if show_diff:
+                diff = difflib.unified_diff(prior.splitlines(), current.splitlines(), lineterm="")
+                st.code("\n".join(diff), language="diff")
+
+# --- Dictation / Report Generation ---
+else:
+    findings = st.text_area("Key Findings / Dictation")
+    detect_template = st.checkbox("Auto-detect Template", value=True)
+    selected_template = None
+
+    if not detect_template:
+        selected_template = st.selectbox("Or Select Template", list_templates())
 
     if st.button("Generate Report"):
-        if not use_template or not os.path.exists(f"{TEMPLATE_DIR}/{use_template}"):
-            st.warning("No suitable template found.")
+        if detect_template:
+            detection_prompt = f"Select the most appropriate radiology template name (e.g. 'CT Chest', 'MRI Brain', 'Ultrasound Pelvis') for the following findings:\n\n{findings}\n\nOnly reply with the template name."
+            response = openai.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": detection_prompt}]
+            )
+            selected_template = response.choices[0].message.content.strip()
+
+        if not selected_template or not os.path.exists(f"{TEMPLATE_DIR}/{selected_template}.txt"):
+            st.error("Template not found. Please create it or select manually.")
             st.stop()
 
-        with open(f"{TEMPLATE_DIR}/{use_template}", "r") as f:
-            template = f.read()
+        template_text = load_template(f"{selected_template}.txt")
 
-        prompt = f"You are a radiologist assistant. You will take the user's findings and inject them into the selected radiology report template. Remove any normal lines that conflict with the findings. Tidy the result. Add a smart impression.\n\nTemplate:\n{template}\n\nFindings:\n{input_text}"
+        main_prompt = f"You are a radiologist assistant. Use the following template and findings to generate a clean, logical radiology report. Remove normal lines that conflict with the findings. Do not invent findings. Add a smart impression at the end.\n\nTEMPLATE:\n{template_text}\n\nFINDINGS:\n{findings}"
 
         with st.spinner("Generating report..."):
-            res = client.chat.completions.create(
+            res = openai.chat.completions.create(
                 model="gpt-4",
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": main_prompt}]
             )
             final_report = res.choices[0].message.content
-            st.text_area("Final Report", final_report, height=500, key="final_output")
-            st.button("📋 Copy to Clipboard", on_click=st.experimental_set_query_params, args=("copied",))
-
-elif mode == "Compare Reports":
-    mic_input("🎤 Dictate Current Report (Optional)")
-    current = st.text_area("🟢 Current Report")
-    prior = st.text_area("🟡 Prior Reports")
-
-    if st.button("Compare & Generate Impression"):
-        compare_prompt = f"You are a radiologist. Compare the current report below to the prior ones and summarize only significant changes. Ignore irrelevant findings like osteophytes or atherosclerosis.\n\nCURRENT REPORT:\n{current}\n\nPRIOR REPORTS:\n{prior}"
-        with st.spinner("Generating comparative impression..."):
-            res = client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": compare_prompt}]
-            )
-            st.text_area("🧠 Comparative Impression", res.choices[0].message.content, height=300)
+            st.text_area("Final Report", final_report, height=500)
+            st.download_button("Copy to Clipboard", final_report, file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt")
