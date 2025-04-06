@@ -3,5 +3,4 @@ openai
 requests
 speechrecognition
 streamlit-webrtc
-
-
+streamlit-mic-recorder
