@@ -8,26 +8,51 @@
 
 import streamlit as st
 import openai
-import os
 import requests
-import time
 
-# --- Config ---
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
+
+# --- Secrets Setup ---
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- Secure Access ---
+# --- Password Gate ---
 if "authenticated" not in st.session_state:
     password = st.text_input("Enter App Password", type="password")
     if password == st.secrets["APP_PASSWORD"]:
         st.session_state.authenticated = True
         st.success("Access granted. Please click below to continue.")
-        st.button("Continue")  # User manually clicks to proceed
+        st.button("Continue")  # Wait for user to click
         st.stop()
     elif password != "":
-        st.error("Incorrect password. Please try again.")
+        st.error("Incorrect password.")
         st.stop()
 
+st.title("🚀 ShivAI Radiology Assistant")
+mode = st.radio("Choose Mode", ["Report", "Compare"])
+auto = st.checkbox("Auto-detect Template", value=True)
+
+# Basic fallback embedded templates
+EMBEDDED_TEMPLATES = {
+    "CT Abdomen": "Type of Study: CT Abdomen\nHistory:\nFindings:\n- Liver: Normal\n- Gallbladder: Normal\nImpression:",
+    "CT Chest": "Type of Study: CT Chest\nHistory:\nFindings:\n- Lungs: Clear\nImpression:",
+}
+
+def detect_template(text):
+    if "liver" in text.lower():
+        return "CT Abdomen"
+    if "lung" in text.lower():
+        return "CT Chest"
+    return None
+
+def fetch_template(name):
+    url = f"https://raw.githubusercontent.com/onlybills26/radiology-templates/main/{name.replace(' ', '%20')}.txt"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.text
+    except:
+        pass
+    return EMBEDDED_TEMPLATES.get(name, None)
 
 
 # --- Template Source ---
