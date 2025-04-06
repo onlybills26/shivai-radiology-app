@@ -1,161 +1,146 @@
+
+# ------------------------------------------------------------------------------
+# ShivAI Radiology Reporting App
+# © 2024 onlybills26@gmail.com - All Rights Reserved
+# This software is proprietary and confidential.
+# Unauthorized use, reproduction, distribution, or modification is strictly prohibited.
+# Commercial use or resale is not allowed without explicit written permission from the author.
+# ------------------------------------------------------------------------------
+
 import streamlit as st
 import openai
 import os
-import requests
-from difflib import unified_diff
-from streamlit_mic_recorder import mic_recorder
+from datetime import datetime
 
-# --- Streamlit Config ---
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
 
-# --- Constants ---
-TEMPLATE_DIR = "templates"
-FALLBACK_TEMPLATE_URL = "https://raw.githubusercontent.com/onlybills26/shivai-templates/main"
-os.makedirs(TEMPLATE_DIR, exist_ok=True)
-
-# --- API Key ---
+# Load API Key securely
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- Footer License ---
-st.markdown("""
----
-<center>
-© 2024 ShivAI by onlybills26. All rights reserved. Protected by MIT/Proprietary license.
-</center>
-""", unsafe_allow_html=True)
+TEMPLATE_DIR = "templates"
+os.makedirs(TEMPLATE_DIR, exist_ok=True)
 
-# --- Helper: Load Template ---
+BASELINE_TEMPLATES = {
+    "CT Abdomen": "Type of Study: CT Abdomen and Pelvis\nHistory:\nFindings:\nImpression:",
+    "CT Chest": "Type of Study: CT Chest\nHistory:\nFindings:\nImpression:",
+    "MRI Brain": "Type of Study: MRI Brain\nHistory:\nFindings:\nImpression:",
+    "Ultrasound Abdomen": "Type of Study: Ultrasound Abdomen\nHistory:\nFindings:\nImpression:",
+    "Ultrasound Pelvis": "Type of Study: Ultrasound Pelvis (Female)\nHistory:\nFindings:\nImpression:",
+    "MRCP": "Type of Study: MRCP\nHistory:\nFindings:\nImpression:",
+    "Thyroid Ultrasound (TI-RADS)": "Type of Study: Ultrasound Thyroid (TI-RADS)\nHistory:\nFindings:\nImpression:",
+    "Breast Ultrasound (BI-RADS)": "Type of Study: Ultrasound Breast (BI-RADS)\nHistory:\nFindings:\nImpression:",
+    "Liver CT (LI-RADS)": "Type of Study: CT Liver (LI-RADS)\nHistory:\nFindings:\nImpression:",
+    "Prostate MRI (PI-RADS)": "Type of Study: MRI Prostate (PI-RADS)\nHistory:\nFindings:\nImpression:"
+}
+
+def list_templates():
+    return [f for f in os.listdir(TEMPLATE_DIR) if f.endswith(".txt")]
+
 def load_template(name):
     local_path = os.path.join(TEMPLATE_DIR, f"{name}.txt")
     if os.path.exists(local_path):
         with open(local_path, "r") as f:
             return f.read()
-    # Try GitHub fallback
-    url = f"{FALLBACK_TEMPLATE_URL}/{name.replace(' ', '%20')}.txt"
-    response = requests.get(url)
-    if response.status_code == 200:
-        with open(local_path, "w") as f:
-            f.write(response.text)
-        return response.text
+    if name in BASELINE_TEMPLATES:
+        return BASELINE_TEMPLATES[name]
     return None
 
-# --- Template Manager ---
-def list_templates():
-    return [f[:-4] for f in os.listdir(TEMPLATE_DIR) if f.endswith(".txt")]
+def detect_template_from_findings(text):
+    keywords = {
+        "liver": "CT Abdomen",
+        "thyroid": "Thyroid Ultrasound (TI-RADS)",
+        "breast": "Breast Ultrasound (BI-RADS)",
+        "lung nodule": "CT Chest",
+        "prostate": "Prostate MRI (PI-RADS)",
+        "biliary": "MRCP",
+        "brain": "MRI Brain",
+        "pelvis": "Ultrasound Pelvis",
+    }
+    for keyword, template in keywords.items():
+        if keyword in text.lower():
+            return template
+    return None
 
-def save_template(name, content):
-    with open(os.path.join(TEMPLATE_DIR, f"{name}.txt"), "w") as f:
-        f.write(content)
+# Sidebar - Template Management
+st.sidebar.title("Templates")
+template_action = st.sidebar.radio("Template Action", ["Use Template", "Add Template", "Edit Template", "Delete Template"])
 
-# --- Sidebar ---
-st.sidebar.title("Template Tools")
-action = st.sidebar.radio("Action", ["Use", "Add", "Edit", "Delete"])
-
-if action == "Add":
-    name = st.sidebar.text_input("Template Name")
+if template_action == "Add Template":
+    name = st.sidebar.text_input("New Template Name")
     content = st.sidebar.text_area("Template Content")
     if st.sidebar.button("Save"):
-        save_template(name, content)
-        st.sidebar.success("Saved")
+        with open(os.path.join(TEMPLATE_DIR, f"{name}.txt"), "w") as f:
+            f.write(content)
+        st.sidebar.success("Template saved.")
 
-elif action == "Edit":
-    sel = st.sidebar.selectbox("Select Template", list_templates())
-    with open(os.path.join(TEMPLATE_DIR, f"{sel}.txt"), "r") as f:
-        content = f.read()
-    edited = st.sidebar.text_area("Edit Content", value=content)
-    if st.sidebar.button("Update"):
-        save_template(sel, edited)
-        st.sidebar.success("Updated")
+elif template_action == "Edit Template":
+    selected = st.sidebar.selectbox("Select Template", list_templates())
+    if selected:
+        with open(os.path.join(TEMPLATE_DIR, selected), "r") as f:
+            content = f.read()
+        edited = st.sidebar.text_area("Edit Template", value=content)
+        if st.sidebar.button("Update Template"):
+            with open(os.path.join(TEMPLATE_DIR, selected), "w") as f:
+                f.write(edited)
+            st.sidebar.success("Template updated.")
 
-elif action == "Delete":
-    sel = st.sidebar.selectbox("Select Template", list_templates())
-    if st.sidebar.button("Delete"):
-        os.remove(os.path.join(TEMPLATE_DIR, f"{sel}.txt"))
-        st.sidebar.warning(f"Deleted {sel}")
+elif template_action == "Delete Template":
+    selected = st.sidebar.selectbox("Template to Delete", list_templates())
+    if selected and st.sidebar.button("Delete"):
+        os.remove(os.path.join(TEMPLATE_DIR, selected))
+        st.sidebar.warning("Template deleted.")
 
-# --- Mic Dictation ---
-dictation_text = ""
-with st.expander("🎙️ Start Dictation"):
-    audio = mic_recorder(start_prompt="Click to Dictate", stop_prompt="Stop Recording", key="mic")
-    if audio and "text" in audio:
-        dictation_text = audio["text"]
+# --- Main App UI ---
+st.title("ShivAI Radiology Reporting Assistant")
 
-# --- Report Generation ---
-st.title("ShivAI Radiology Assistant")
-mode = st.radio("Mode", ["Dictate / Type Findings", "Paste Full Report", "Compare Reports"])
+mode = st.radio("Choose Mode", ["Dictate/Type Findings", "Compare Reports"])
+
+auto_detect = st.checkbox("Auto-detect Template", value=True)
+show_changes = st.checkbox("Show Changes")
 
 if mode == "Compare Reports":
-    curr = st.text_area("Current Report")
-    prior = st.text_area("Prior Report(s)")
-    show_diff = st.checkbox("Show Changes")
-    if st.button("Generate Comparison"):
-        prompt = f"You are a radiologist. Compare current and prior reports. Show only significant changes. Ignore osteophytes and vascular calcifications.\n\nCURRENT:\n{curr}\n\nPRIOR:\n{prior}"
-        with st.spinner("Generating..."):
-            res = openai.ChatCompletion.create(
+    st.subheader("Current Report")
+    current = st.text_area("Paste current report")
+    st.subheader("Prior Report(s)")
+    prior = st.text_area("Paste one or more prior reports")
+
+    if st.button("Compare & Generate Impression"):
+        prompt = f"You are a radiologist. Compare the current report below to the prior ones and summarize only significant changes. Ignore irrelevant findings like osteophytes or vascular calcification.\n\nCURRENT REPORT:\n{current}\n\nPRIOR REPORTS:\n{prior}"
+        with st.spinner("Generating comparative impression..."):
+            res = openai.chat.completions.create(
                 model="gpt-4",
                 messages=[{"role": "system", "content": prompt}]
             )
             output = res.choices[0].message.content
             st.text_area("Comparative Impression", output, height=300)
-            if show_diff:
-                diffs = unified_diff(prior.splitlines(), curr.splitlines(), lineterm="")
-                st.code("\n".join(diffs))
 
 else:
-    input_text = st.text_area("Key Findings / Dictation", value=dictation_text)
-    auto_detect = st.checkbox("Auto-detect template", value=True)
-    selected = st.selectbox("Or Select Template", list_templates()) if not auto_detect else None
+    findings = st.text_area("Key Findings or Dictation")
+
+    selected_template = None
+    if not auto_detect:
+        selected_template = st.selectbox("Select Template", list_templates())
+    else:
+        detected = detect_template_from_findings(findings)
+        st.markdown(f"**Auto-Detected Template:** {detected or 'None'}")
+        selected_template = detected
 
     if st.button("Generate Report"):
-        template_name = None
-
-        if auto_detect:
-            # basic detection logic
-            for t in list_templates():
-                if t.lower().replace("ct ", "") in input_text.lower():
-                    template_name = t
-                    break
-        else:
-            template_name = selected
-
-        template = load_template(template_name) if template_name else None
-
+        template = load_template(selected_template)
         if not template:
-            st.error(f"Template '{template_name}' not found. Please create it or select manually.")
+            st.warning(f"Template '{selected_template}' not found. Please create it or select manually.")
             st.stop()
 
-        # GPT Prompt
-        base_prompt = f"""
-        You are a radiologist assistant. Take the user's findings and inject them into the selected radiology template.
-        Remove normal/conflicting lines. Format the output as:
-
-        Type of Study: [Infer or use from template name]
-        History: [leave blank if not dictated]
-
-        Findings:
-        [Structured findings with smart formatting]
-
-        Impression:
-        [Summarize abnormalities only. No repetition.]
-
-        Template:
-        {template}
-
-        Findings:
-        {input_text}
-        """
-
-        with st.spinner("Generating report..."):
-            res = openai.ChatCompletion.create(
+        prompt = f"You are a radiologist assistant. Insert the following findings into the report template below. Remove any conflicting normal lines. Tidy the result. Always include structured impression.\n\nTEMPLATE:\n{template}\n\nFINDINGS:\n{findings}"
+        with st.spinner("Generating Report..."):
+            res = openai.chat.completions.create(
                 model="gpt-4",
-                messages=[{"role": "user", "content": base_prompt}]
+                messages=[{"role": "user", "content": prompt}]
             )
             final = res.choices[0].message.content
             st.text_area("Final Report", final, height=500)
-            st.download_button("📋 Copy to Clipboard", final, file_name="report.txt")
+            st.download_button("Copy to Clipboard", final)
 
-# --- Requirements Reminder ---
-# streamlit
-# openai
-# streamlit_mic_recorder
-# requests
+# Footer
+st.markdown("---")
+st.markdown("© 2024 ShivAI | All Rights Reserved. Unauthorized use or resale prohibited. Contact onlybills26@gmail.com")
