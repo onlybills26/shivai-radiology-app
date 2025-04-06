@@ -63,7 +63,8 @@ st.markdown("### 🎙️ Dictation Mode")
 st.info("Press the button below to start dictation. The recording will stop automatically after 30 seconds of silence.")
 
 # Use the mic_recorder widget from streamlit-mic-recorder
-audio_bytes = mic_recorder("Start Dictation", pause_threshold=1.0, silence_timeout=30)
+audio_bytes = mic_recorder("Start Dictation", pause_threshold=1.0)
+
 
 dictation_text = ""
 if audio_bytes is not None:
