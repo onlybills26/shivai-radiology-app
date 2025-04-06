@@ -16,6 +16,16 @@ import time
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
+# --- Secure Access ---
+if "authenticated" not in st.session_state:
+    password = st.text_input("Enter App Password", type="password")
+    if password == st.secrets["APP_PASSWORD"]:
+        st.session_state.authenticated = True
+        st.experimental_rerun()
+    else:
+        st.stop()
+
+
 # --- Template Source ---
 EMBEDDED_TEMPLATES = {
     "CT Abdomen": "Type of Study: CT Abdomen and Pelvis\nHistory:\nFindings:\n- Liver: Normal.\n- Gallbladder: No stones.\n- Pancreas: Normal.\n- Spleen: Normal.\n- Kidneys: No hydronephrosis.\nImpression:",
