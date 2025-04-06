@@ -4,7 +4,7 @@ import os
 import difflib
 from datetime import datetime
 
-# --- ShivAI Radiology Reporting App ---
+# ShivAI Radiology Reporting App
 # © 2024 onlybills26. All Rights Reserved.
 # Unauthorized copying, distribution, or modification is prohibited.
 
@@ -20,18 +20,21 @@ os.makedirs(TEMPLATE_DIR, exist_ok=True)
 
 # --- Helper Functions ---
 def list_templates():
-    return [f for f in os.listdir(TEMPLATE_DIR) if f.endswith(".txt")]
+    return [f[:-4] for f in os.listdir(TEMPLATE_DIR) if f.endswith(".txt")]
 
 def load_template(name):
-    with open(f"{TEMPLATE_DIR}/{name}", "r") as f:
-        return f.read()
+    path = os.path.join(TEMPLATE_DIR, f"{name}.txt")
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return f.read()
+    return None
 
 def save_template(name, content):
-    with open(f"{TEMPLATE_DIR}/{name}", "w") as f:
+    with open(os.path.join(TEMPLATE_DIR, f"{name}.txt"), "w") as f:
         f.write(content)
 
 def delete_template(name):
-    os.remove(f"{TEMPLATE_DIR}/{name}")
+    os.remove(os.path.join(TEMPLATE_DIR, f"{name}.txt"))
 
 # --- Sidebar: Template Management ---
 st.sidebar.title("Templates")
@@ -41,12 +44,13 @@ if template_action == "Add Template":
     new_name = st.sidebar.text_input("Template Name")
     new_content = st.sidebar.text_area("Template Content")
     if st.sidebar.button("Save Template"):
-        save_template(f"{new_name}.txt", new_content)
+        save_template(new_name, new_content)
         st.sidebar.success("Template saved.")
 
 elif template_action == "Edit Template":
-    selected = st.sidebar.selectbox("Select Template", list_templates())
-    if selected:
+    templates = list_templates()
+    if templates:
+        selected = st.sidebar.selectbox("Select Template", templates)
         current = load_template(selected)
         edited = st.sidebar.text_area("Edit Template", value=current)
         if st.sidebar.button("Update Template"):
@@ -54,10 +58,12 @@ elif template_action == "Edit Template":
             st.sidebar.success("Template updated.")
 
 elif template_action == "Delete Template":
-    selected = st.sidebar.selectbox("Select Template", list_templates())
-    if selected and st.sidebar.button("Delete Template"):
-        delete_template(selected)
-        st.sidebar.warning(f"Deleted {selected}")
+    templates = list_templates()
+    if templates:
+        selected = st.sidebar.selectbox("Select Template", templates)
+        if st.sidebar.button("Delete Template"):
+            delete_template(selected)
+            st.sidebar.warning(f"Deleted {selected}")
 
 # --- Access Control ---
 password = st.text_input("Enter Access Password", type="password")
@@ -93,25 +99,31 @@ if mode == "Compare Reports":
 else:
     findings = st.text_area("Key Findings / Dictation")
     detect_template = st.checkbox("Auto-detect Template", value=True)
-    selected_template = None
+    template_name = None
 
     if not detect_template:
-        selected_template = st.selectbox("Or Select Template", list_templates())
+        templates = list_templates()
+        template_name = st.selectbox("Select Template", templates)
+    else:
+        if st.button("Detect Template"):
+            detection_prompt = f"Select the most appropriate radiology template name (e.g. 'CT Chest', 'MRI Brain', 'Ultrasound Pelvis') for the following findings:\n\n{findings}\n\nOnly reply with the template name."
+            with st.spinner("Detecting template..."):
+                response = openai.chat.completions.create(
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": detection_prompt}]
+                )
+                template_name = response.choices[0].message.content.strip()
+                st.session_state.detected_template = template_name
+                st.success(f"Detected Template: {template_name}")
 
     if st.button("Generate Report"):
         if detect_template:
-            detection_prompt = f"Select the most appropriate radiology template name (e.g. 'CT Chest', 'MRI Brain', 'Ultrasound Pelvis') for the following findings:\n\n{findings}\n\nOnly reply with the template name."
-            response = openai.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": detection_prompt}]
-            )
-            selected_template = response.choices[0].message.content.strip()
+            template_name = st.session_state.get("detected_template")
 
-        if not selected_template or not os.path.exists(f"{TEMPLATE_DIR}/{selected_template}.txt"):
-            st.error("Template not found. Please create it or select manually.")
+        template_text = load_template(template_name)
+        if not template_text:
+            st.error(f"Template '{template_name}' not found. Please create it or select manually.")
             st.stop()
-
-        template_text = load_template(f"{selected_template}.txt")
 
         main_prompt = f"You are a radiologist assistant. Use the following template and findings to generate a clean, logical radiology report. Remove normal lines that conflict with the findings. Do not invent findings. Add a smart impression at the end.\n\nTEMPLATE:\n{template_text}\n\nFINDINGS:\n{findings}"
 
