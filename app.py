@@ -62,21 +62,18 @@ def fetch_template(name):
 st.markdown("### 🎙️ Dictation Mode")
 st.info("Press the button below to start dictation. The recording will stop automatically after 30 seconds of silence.")
 
-# Use the mic_recorder widget from streamlit-mic-recorder
-audio_bytes = mic_recorder(start_prompt="🎙️ Start Dictation")
-
-
+# Capture audio using the mic_recorder widget
+audio_data = mic_recorder(start_prompt="🎙️ Start Dictation")
 
 dictation_text = ""
-if audio_bytes is not None:
+if audio_data and "audio" in audio_data:
+    audio_bytes = audio_data["audio"]
     st.success("Audio captured. Processing dictation...")
     r = sr.Recognizer()
     try:
-        # Assuming the audio_bytes are in WAV format.
-        # If not, conversion using pydub or ffmpeg is needed.
         with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
-            audio_data = r.record(source)
-        dictation_text = r.recognize_google(audio_data)
+            audio_source = r.record(source)
+        dictation_text = r.recognize_google(audio_source)
         st.text_area("Dictated Text", dictation_text, height=200)
     except sr.UnknownValueError:
         st.error("Speech Recognition could not understand the audio.")
@@ -84,6 +81,8 @@ if audio_bytes is not None:
         st.error(f"Could not request results from the speech recognition service; {e}")
     except Exception as ex:
         st.error(f"An error occurred during audio processing: {ex}")
+else:
+    st.info("Waiting for audio input...")
 
 # --- App Logic ---
 st.title("ShivAI Radiology Assistant")
