@@ -1,8 +1,7 @@
 streamlit
 openai
 requests
+numpy
+av
 speechrecognition
 streamlit-webrtc
-streamlit-mic-recorderstreamlit
-pydub
-numpy
