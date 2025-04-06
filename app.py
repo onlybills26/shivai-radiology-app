@@ -6,19 +6,16 @@ import time
 from streamlit_mic_recorder import mic_recorder
 import speech_recognition as sr
 
-# ------------------------------------------------------------------------------
+# --------------------------------------------------------------------
 # ShivAI Radiology Reporting App
 # © 2024 onlybills26@gmail.com - All Rights Reserved
-# This software is proprietary and confidential.
-# Unauthorized use, reproduction, distribution, or modification is strictly prohibited.
-# Commercial use or resale is not allowed without explicit written permission from the author.
-# ------------------------------------------------------------------------------
+# --------------------------------------------------------------------
 
 # --- Config ---
 st.set_page_config(page_title="ShivAI Radiology", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- Template Source (Embedded and GitHub fallback) ---
+# --- Embedded Templates ---
 EMBEDDED_TEMPLATES = {
     "CT Abdomen": """Type of Study: CT Abdomen and Pelvis\nHistory:\nFindings:\n- Liver: Normal.\n- Gallbladder: No stones.\n- Pancreas: Normal.\n- Spleen: Normal.\n- Kidneys: No hydronephrosis.\nImpression:""",
     "CT Chest": """Type of Study: CT Chest\nHistory:\nFindings:\n- Lungs: Clear.\n- Mediastinum: Normal.\n- Pleura: No effusion.\nImpression:""",
@@ -58,11 +55,10 @@ def fetch_template(name):
         st.error(f"Error fetching template from GitHub: {e}")
     return EMBEDDED_TEMPLATES.get(name, None)
 
-# --- Advanced Microphone Integration ---
+# --- Dictation Mode ---
 st.markdown("### 🎙️ Dictation Mode")
 st.info("Press the button below to start dictation. The recording will stop automatically after 30 seconds of silence.")
 
-# Capture audio using the mic_recorder widget
 audio_data = mic_recorder(start_prompt="🎙️ Start Dictation")
 
 dictation_text = ""
@@ -84,7 +80,7 @@ if audio_data and "audio" in audio_data:
 else:
     st.info("Waiting for audio input...")
 
-# --- App Logic ---
+# --- Main UI ---
 st.title("ShivAI Radiology Assistant")
 mode = st.radio("Choose Mode", ["Report", "Compare"])
 auto = st.checkbox("Auto-detect Template", value=True)
@@ -100,8 +96,8 @@ if mode == "Compare":
                 messages=[{"role": "system", "content": prompt}]
             )
             st.text_area("Comparative Impression", res.choices[0].message.content, height=300)
+
 else:
-    # Use either the dictated text or manual text from key findings
     findings_input = st.text_area("Key Findings / Dictation", value=dictation_text)
     template_name = detect_template(findings_input) if auto else st.selectbox("Select Template", list(EMBEDDED_TEMPLATES.keys()))
     st.markdown(f"**Detected Template:** {template_name if template_name else 'None'}")
